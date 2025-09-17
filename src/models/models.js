@@ -41,6 +41,24 @@ const BasketItem = sequelize.define("basket_item", {
       allowNull: false,
       references: { model: "products", key: "id" },
     },
+    selectedColorId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "colors", key: "id" },
+    },
+    selectedSizeId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "sizes", key: "id" },
+    },
+    quantity: { 
+      type: DataTypes.INTEGER, 
+      allowNull: false, 
+      defaultValue: 1,
+      validate: {
+        min: 1
+      }
+    },
 });
 
 const Product = sequelize.define("product", {
@@ -112,7 +130,7 @@ const MediaFile = sequelize.define("media_file", {
     bucket: { type: DataTypes.STRING, allowNull: false },
     url: { type: DataTypes.STRING, allowNull: true },
     entityType: {
-      type: DataTypes.ENUM("product", "collection", "other"),
+      type: DataTypes.ENUM("product", "collection", "news", "other"),
       defaultValue: "other",
       allowNull: false,
     },
@@ -172,13 +190,151 @@ const MediaFile = sequelize.define("media_file", {
     ]
   });
 
+  const Order = sequelize.define("order", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "users", key: "id" },
+    },
+    status: {
+      type: DataTypes.ENUM("CREATED", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"),
+      defaultValue: "CREATED",
+      allowNull: false,
+    },
+    recipientName: { type: DataTypes.STRING, allowNull: false },
+    recipientAddress: { type: DataTypes.TEXT, allowNull: false },
+    paymentMethod: {
+      type: DataTypes.ENUM("CASH", "CARD", "BANK_TRANSFER"),
+      allowNull: false,
+    },
+    totalKZT: { type: DataTypes.INTEGER, allowNull: false },
+    totalUSD: { type: DataTypes.INTEGER, allowNull: false },
+    notes: { type: DataTypes.TEXT, allowNull: true },
+  });
+
+  const OrderItem = sequelize.define("order_item", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    orderId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "orders", key: "id" },
+    },
+    productId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "products", key: "id" },
+    },
+    selectedColorId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "colors", key: "id" },
+    },
+    selectedSizeId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "sizes", key: "id" },
+    },
+    quantity: { 
+      type: DataTypes.INTEGER, 
+      allowNull: false, 
+      defaultValue: 1,
+      validate: {
+        min: 1
+      }
+    },
+    priceKZT: { type: DataTypes.INTEGER, allowNull: false },
+    priceUSD: { type: DataTypes.INTEGER, allowNull: false },
+  });
+
+  // Модель для типов новостей
+  const NewsType = sequelize.define("news_type", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { 
+      type: DataTypes.STRING, 
+      allowNull: false,
+      unique: true 
+    },
+    description: { type: DataTypes.STRING, allowNull: true },
+  });
+
+  // Модель для тегов
+  const Tag = sequelize.define("tag", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { 
+      type: DataTypes.STRING, 
+      allowNull: false,
+      unique: true 
+    },
+    color: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      validate: {
+        is: /^#[0-9A-F]{6}$/i // Валидация hex цвета
+      }
+    },
+  });
+
+  // Модель для новостей
+  const News = sequelize.define("news", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    title: { type: DataTypes.STRING, allowNull: false },
+    description: { type: DataTypes.TEXT, allowNull: true },
+    content: { type: DataTypes.TEXT, allowNull: false },
+    links: { 
+      type: DataTypes.JSON, 
+      allowNull: true,
+      defaultValue: []
+    },
+    status: {
+      type: DataTypes.ENUM("DRAFT", "PUBLISHED", "ARCHIVED"),
+      defaultValue: "DRAFT",
+      allowNull: false,
+    },
+    newsTypeId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "news_types", key: "id" },
+    },
+    authorId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "users", key: "id" },
+    },
+    publishedAt: { type: DataTypes.DATE, allowNull: true },
+  });
+
+  // Промежуточная таблица для связи новостей и тегов
+  const NewsTag = sequelize.define("news_tag", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    newsId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "news", key: "id" },
+    },
+    tagId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "tags", key: "id" },
+    },
+  }, {
+    indexes: [
+      {
+        unique: true,
+        fields: ['newsId', 'tagId']
+      }
+    ]
+  });
+
   User.hasMany(BasketItem, { foreignKey: "userId", as: "basketItems" });
   User.hasMany(MediaFile, { foreignKey: "userId", as: "uploadedFiles" });
+  User.hasMany(News, { foreignKey: "authorId", as: "news" });
 
   Product.hasMany(MediaFile, { 
     foreignKey: "entityId", 
     as: "mediaFiles",
-    scope: { entityType: "product" }
+    scope: { entityType: "product" },
+    constraints: false
   });
   Product.belongsTo(ClothingType, { foreignKey: "clothingTypeId", as: "clothingType" });
   Product.hasMany(BasketItem, { foreignKey: "productId", as: "basketItems", onDelete: "CASCADE" });
@@ -189,7 +345,8 @@ const MediaFile = sequelize.define("media_file", {
   Collection.hasMany(MediaFile, { 
     foreignKey: "entityId", 
     as: "mediaFiles",
-    scope: { entityType: "collection" }
+    scope: { entityType: "collection" },
+    constraints: false
   });
 
   ClothingType.hasMany(Product, { foreignKey: "clothingTypeId", as: "products" });
@@ -228,6 +385,46 @@ const MediaFile = sequelize.define("media_file", {
 
   BasketItem.belongsTo(User, { foreignKey: "userId", as: "user" });
   BasketItem.belongsTo(Product, { foreignKey: "productId", as: "product", onDelete: "CASCADE" });
+  BasketItem.belongsTo(Color, { foreignKey: "selectedColorId", as: "selectedColor" });
+  BasketItem.belongsTo(Size, { foreignKey: "selectedSizeId", as: "selectedSize" });
+
+  // Связи для заказов
+  User.hasMany(Order, { foreignKey: "userId", as: "orders" });
+  Order.belongsTo(User, { foreignKey: "userId", as: "user" });
+  
+  Order.hasMany(OrderItem, { foreignKey: "orderId", as: "orderItems", onDelete: "CASCADE" });
+  OrderItem.belongsTo(Order, { foreignKey: "orderId", as: "order" });
+  
+  OrderItem.belongsTo(Product, { foreignKey: "productId", as: "product", onDelete: "CASCADE" });
+  OrderItem.belongsTo(Color, { foreignKey: "selectedColorId", as: "selectedColor" });
+  OrderItem.belongsTo(Size, { foreignKey: "selectedSizeId", as: "selectedSize" });
+
+  // Связи для новостей
+  News.belongsTo(User, { foreignKey: "authorId", as: "author" });
+  News.belongsTo(NewsType, { foreignKey: "newsTypeId", as: "newsType" });
+  News.hasMany(MediaFile, { 
+    foreignKey: "entityId", 
+    as: "mediaFiles",
+    scope: { entityType: "news" },
+    constraints: false
+  });
+
+  // Many-to-many между News и Tag через NewsTag
+  News.belongsToMany(Tag, { 
+    through: NewsTag, 
+    foreignKey: "newsId",
+    otherKey: "tagId",
+    as: "tags" 
+  });
+  
+  Tag.belongsToMany(News, { 
+    through: NewsTag, 
+    foreignKey: "tagId",
+    otherKey: "newsId",
+    as: "news" 
+  });
+
+  NewsType.hasMany(News, { foreignKey: "newsTypeId", as: "news" });
 
   Product.addHook("afterDestroy", async (product, options) => {
     await MediaFile.destroy({
@@ -265,6 +462,24 @@ const MediaFile = sequelize.define("media_file", {
     });
   });
 
+  News.addHook("afterDestroy", async (news, options) => {
+    await MediaFile.destroy({
+      where: {
+        entityType: "news",
+        entityId: news.id,
+      },
+      transaction: options.transaction,
+    });
+    
+    // Удаляем связи с тегами
+    await NewsTag.destroy({
+      where: {
+        newsId: news.id,
+      },
+      transaction: options.transaction,
+    });
+  });
+
 
   module.exports = {
     User,
@@ -277,4 +492,10 @@ const MediaFile = sequelize.define("media_file", {
     ProductSize,
     Color,
     ProductColor,
+    Order,
+    OrderItem,
+    News,
+    NewsType,
+    Tag,
+    NewsTag,
   };

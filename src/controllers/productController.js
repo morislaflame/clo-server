@@ -343,6 +343,7 @@ class ProductController {
         collectionId,
         sizeIds, // новые размеры
         colorIds, // новые цвета
+        deletedMediaIds, // удаленные медиафайлы
       } = req.body;
 
       const product = await Product.findByPk(id, { transaction });
@@ -369,21 +370,101 @@ class ProductController {
       await product.update(updateData, { transaction });
 
       // Обновляем размеры, если переданы
-      if (sizeIds && Array.isArray(sizeIds)) {
-        const sizes = await Size.findAll({
-          where: { id: sizeIds },
-          transaction
-        });
-        await product.setSizes(sizes, { transaction });
+      if (sizeIds !== undefined) {
+        let parsedSizeIds = sizeIds;
+        
+        // Парсим sizeIds если это строка
+        if (typeof sizeIds === 'string') {
+          try {
+            // Пробуем распарсить как JSON
+            parsedSizeIds = JSON.parse(sizeIds);
+          } catch {
+            // Если не JSON, то разделяем по запятой
+            parsedSizeIds = sizeIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+          }
+        }
+        
+        if (Array.isArray(parsedSizeIds)) {
+          if (parsedSizeIds.length > 0) {
+            const sizes = await Size.findAll({
+              where: { id: parsedSizeIds },
+              transaction
+            });
+            console.log('Found sizes:', sizes.map(s => ({ id: s.id, name: s.name })));
+            await product.setSizes(sizes, { transaction });
+          } else {
+            // Очищаем все размеры
+            console.log('Clearing all sizes');
+            await product.setSizes([], { transaction });
+          }
+        }
       }
 
       // Обновляем цвета, если переданы
-      if (colorIds && Array.isArray(colorIds)) {
-        const colors = await Color.findAll({
-          where: { id: colorIds },
-          transaction
-        });
-        await product.setColors(colors, { transaction });
+      if (colorIds !== undefined) {
+        let parsedColorIds = colorIds;
+        
+        // Парсим colorIds если это строка
+        if (typeof colorIds === 'string') {
+          try {
+            // Пробуем распарсить как JSON
+            parsedColorIds = JSON.parse(colorIds);
+          } catch {
+            // Если не JSON, то разделяем по запятой
+            parsedColorIds = colorIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+          }
+        }
+        
+        if (Array.isArray(parsedColorIds)) {
+          if (parsedColorIds.length > 0) {
+            const colors = await Color.findAll({
+              where: { id: parsedColorIds },
+              transaction
+            });
+            await product.setColors(colors, { transaction });
+          } else {
+            // Очищаем все цвета
+            await product.setColors([], { transaction });
+          }
+        }
+      }
+
+      // Обработка удаления медиафайлов
+      if (deletedMediaIds) {
+        let parsedDeletedMediaIds = deletedMediaIds;
+        
+        // Парсим deletedMediaIds если это строка
+        if (typeof deletedMediaIds === 'string') {
+          try {
+            parsedDeletedMediaIds = JSON.parse(deletedMediaIds);
+          } catch {
+            console.error("Error parsing deletedMediaIds:", deletedMediaIds);
+            parsedDeletedMediaIds = [];
+          }
+        }
+        
+        if (Array.isArray(parsedDeletedMediaIds) && parsedDeletedMediaIds.length > 0) {
+          for (const mediaId of parsedDeletedMediaIds) {
+            try {
+              // Проверяем, принадлежит ли медиафайл этому продукту
+              const mediaFile = await MediaFile.findOne({
+                where: {
+                  id: mediaId,
+                  entityType: "product",
+                  entityId: product.id,
+                },
+                transaction
+              });
+
+              if (mediaFile) {
+                await deleteFile(mediaId);
+                console.log(`Deleted media file ${mediaId} for product ${product.id}`);
+              }
+            } catch (deleteError) {
+              console.error(`Error deleting media file ${mediaId}:`, deleteError);
+            }
+          }
+        }
       }
 
       // Обработка новых медиафайлов
