@@ -10,6 +10,7 @@ const orderRouter = require('./orderRouter');
 const newsRouter = require('./newsRouter');
 const tagRouter = require('./tagRouter');
 const newsTypeRouter = require('./newsTypeRouter');
+const collectionRouter = require('./collectionRouter');
 
 const router = new Router();
 
@@ -23,5 +24,6 @@ router.use('/order', orderRouter);
 router.use('/news', newsRouter);
 router.use('/tag', tagRouter);
 router.use('/news-type', newsTypeRouter);
+router.use('/collection', collectionRouter);
 
 module.exports = router;

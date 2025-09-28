@@ -173,6 +173,7 @@ class ProductController {
         status,
         clothingTypeId,
         collectionId,
+        notInCollection,
         minPrice,
         maxPrice,
         currency = "KZT",
@@ -218,6 +219,11 @@ class ProductController {
       if (status) where.status = status;
       if (clothingTypeId) where.clothingTypeId = clothingTypeId;
       if (collectionId) where.collectionId = collectionId;
+      
+      // Фильтр для продуктов, не добавленных ни в одну коллекцию
+      if (notInCollection === 'true') {
+        where.collectionId = null;
+      }
 
       // Фильтр по размеру
       if (size) {
