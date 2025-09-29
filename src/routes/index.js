@@ -11,6 +11,7 @@ const newsRouter = require('./newsRouter');
 const tagRouter = require('./tagRouter');
 const newsTypeRouter = require('./newsTypeRouter');
 const collectionRouter = require('./collectionRouter');
+const mainBannerRouter = require('./mainBannerRouter');
 
 const router = new Router();
 
@@ -25,5 +26,6 @@ router.use('/news', newsRouter);
 router.use('/tag', tagRouter);
 router.use('/news-type', newsTypeRouter);
 router.use('/collection', collectionRouter);
+router.use('/main-banner', mainBannerRouter);
 
 module.exports = router;

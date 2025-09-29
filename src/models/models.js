@@ -130,7 +130,7 @@ const MediaFile = sequelize.define("media_file", {
     bucket: { type: DataTypes.STRING, allowNull: false },
     url: { type: DataTypes.STRING, allowNull: true },
     entityType: {
-      type: DataTypes.ENUM("product", "collection", "news", "other"),
+      type: DataTypes.ENUM("product", "collection", "news", "other", "main_banner"),
       defaultValue: "other",
       allowNull: false,
     },
@@ -326,6 +326,16 @@ const MediaFile = sequelize.define("media_file", {
     ]
   });
 
+  const MainBanner = sequelize.define("main_banner", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    title: { type: DataTypes.STRING, allowNull: true },
+    isActive: { 
+      type: DataTypes.BOOLEAN, 
+      allowNull: false, 
+      defaultValue: true 
+    },
+  });
+
   User.hasMany(BasketItem, { foreignKey: "userId", as: "basketItems" });
   User.hasMany(MediaFile, { foreignKey: "userId", as: "uploadedFiles" });
   User.hasMany(News, { foreignKey: "authorId", as: "news" });
@@ -426,6 +436,14 @@ const MediaFile = sequelize.define("media_file", {
 
   NewsType.hasMany(News, { foreignKey: "newsTypeId", as: "news" });
 
+  // Связи для главного баннера
+  MainBanner.hasMany(MediaFile, { 
+    foreignKey: "entityId", 
+    as: "mediaFiles",
+    scope: { entityType: "main_banner" },
+    constraints: false
+  });
+
   Product.addHook("afterDestroy", async (product, options) => {
     await MediaFile.destroy({
       where: {
@@ -480,6 +498,16 @@ const MediaFile = sequelize.define("media_file", {
     });
   });
 
+  MainBanner.addHook("afterDestroy", async (mainBanner, options) => {
+    await MediaFile.destroy({
+      where: {
+        entityType: "main_banner",
+        entityId: mainBanner.id,
+      },
+      transaction: options.transaction,
+    });
+  });
+
 
   module.exports = {
     User,
@@ -498,4 +526,5 @@ const MediaFile = sequelize.define("media_file", {
     NewsType,
     Tag,
     NewsTag,
+    MainBanner,
   };
