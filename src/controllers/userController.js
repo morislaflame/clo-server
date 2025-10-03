@@ -111,6 +111,39 @@ class UserController {
       next(ApiError.internal(e.message));
     }
   }
+
+  async createGuestUser(req, res, next) {
+    const transaction = await sequelize.transaction();
+    
+    try {
+      // Генерируем уникальный ID сессии
+      const guestSessionId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Создаем гостевого пользователя
+      const guestUser = await User.create(
+        {
+          role: "USER",
+          isGuest: true,
+          guestSessionId: guestSessionId,
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      const token = generateJwt(guestUser);
+
+      return res.json({ 
+        token,
+        isGuest: true,
+        userId: guestUser.id 
+      });
+    } catch (e) {
+      await transaction.rollback();
+      console.error("Error creating guest user:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
 }
 
 module.exports = new UserController();

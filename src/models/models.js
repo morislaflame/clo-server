@@ -26,6 +26,17 @@ const User = sequelize.define(
       allowNull: false,
     },
     language: { type: DataTypes.STRING, allowNull: true },
+    // Поля для гостевых пользователей
+    isGuest: { 
+      type: DataTypes.BOOLEAN, 
+      defaultValue: false, 
+      allowNull: false 
+    },
+    guestSessionId: { 
+      type: DataTypes.STRING, 
+      unique: true, 
+      allowNull: true 
+    },
   }
 );
 
@@ -204,6 +215,9 @@ const MediaFile = sequelize.define("media_file", {
     },
     recipientName: { type: DataTypes.STRING, allowNull: false },
     recipientAddress: { type: DataTypes.TEXT, allowNull: false },
+    // Поля для гостевых заказов
+    recipientPhone: { type: DataTypes.STRING, allowNull: true },
+    recipientEmail: { type: DataTypes.STRING, allowNull: true },
     paymentMethod: {
       type: DataTypes.ENUM("CASH", "CARD", "BANK_TRANSFER"),
       allowNull: false,

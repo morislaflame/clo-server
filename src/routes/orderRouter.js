@@ -13,6 +13,9 @@ router.use(authMiddleware);
 
 // === ПОЛЬЗОВАТЕЛЬСКИЕ МАРШРУТЫ ===
 
+// Создание гостевого заказа (товары передаются в запросе)
+router.post("/guest", userLimiter, orderController.createGuestOrder);
+
 // Создание заказа из корзины
 router.post("/create", userLimiter, orderController.createOrder);
 

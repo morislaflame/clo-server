@@ -11,9 +11,145 @@ const {
   Size,
   Color,
   BasketItem,
+  User,
 } = require("../models/models");
 
 class OrderController {
+  // Создание гостевого заказа (без корзины, товары передаются в запросе)
+  async createGuestOrder(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const userId = req.user.id;
+      const { 
+        recipientName, 
+        recipientAddress,
+        recipientPhone,
+        recipientEmail,
+        paymentMethod, 
+        notes,
+        items // Массив товаров из локальной корзины
+      } = req.body;
+
+      // Валидация обязательных полей
+      if (!recipientName || !recipientAddress || !paymentMethod || !items || items.length === 0) {
+        await transaction.rollback();
+        return next(ApiError.badRequest("Recipient name, address, payment method and items are required"));
+      }
+
+      // Подсчитываем общую стоимость и проверяем товары
+      let totalKZT = 0;
+      let totalUSD = 0;
+
+      for (const item of items) {
+        const product = await Product.findByPk(item.productId, { transaction });
+        
+        if (!product) {
+          await transaction.rollback();
+          return next(ApiError.notFound(`Product ${item.productId} not found`));
+        }
+
+        if (product.status !== "AVAILABLE") {
+          await transaction.rollback();
+          return next(ApiError.badRequest(`Product ${product.name} is not available`));
+        }
+
+        totalKZT += product.priceKZT * item.quantity;
+        totalUSD += product.priceUSD * item.quantity;
+      }
+
+      // Создаем заказ
+      const order = await Order.create(
+        {
+          userId,
+          recipientName,
+          recipientAddress,
+          recipientPhone,
+          recipientEmail,
+          paymentMethod,
+          totalKZT,
+          totalUSD,
+          notes: notes || null,
+          status: "CREATED",
+        },
+        { transaction }
+      );
+
+      // Создаем элементы заказа
+      for (const item of items) {
+        const product = await Product.findByPk(item.productId, { transaction });
+        
+        await OrderItem.create(
+          {
+            orderId: order.id,
+            productId: item.productId,
+            selectedColorId: item.selectedColorId || null,
+            selectedSizeId: item.selectedSizeId || null,
+            quantity: item.quantity,
+            priceKZT: product.priceKZT,
+            priceUSD: product.priceUSD,
+          },
+          { transaction }
+        );
+      }
+
+      await transaction.commit();
+
+      // Получаем созданный заказ с полной информацией
+      const createdOrder = await Order.findByPk(order.id, {
+        include: [
+          {
+            model: OrderItem,
+            as: "orderItems",
+            include: [
+              {
+                model: Product,
+                as: "product",
+                include: [
+                  {
+                    model: MediaFile,
+                    as: "mediaFiles",
+                    where: { entityType: "product" },
+                    required: false,
+                  },
+                  {
+                    model: ClothingType,
+                    as: "clothingType",
+                    required: false,
+                  },
+                  {
+                    model: Collection,
+                    as: "collection",
+                    required: false,
+                  },
+                ],
+              },
+              {
+                model: Color,
+                as: "selectedColor",
+                required: false,
+              },
+              {
+                model: Size,
+                as: "selectedSize",
+                required: false,
+              },
+            ],
+          },
+        ],
+      });
+
+      return res.json({
+        message: "Order created successfully",
+        order: createdOrder,
+      });
+    } catch (e) {
+      await transaction.rollback();
+      console.error("Error creating guest order:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
+
   // Создание заказа из корзины
   async createOrder(req, res, next) {
     const transaction = await sequelize.transaction();
@@ -198,6 +334,8 @@ class OrderController {
 
       const { count, rows: orders } = await Order.findAndCountAll({
         where,
+        distinct: true,
+        col: 'id',
         include: [
           {
             model: OrderItem,
@@ -384,6 +522,8 @@ class OrderController {
 
       const { count, rows: orders } = await Order.findAndCountAll({
         where,
+        distinct: true,
+        col: 'id',
         include: [
           {
             model: OrderItem,
@@ -426,7 +566,7 @@ class OrderController {
           {
             model: User,
             as: "user",
-            attributes: ["id", "email"],
+            attributes: ["id", "email", "isGuest"],
           },
         ],
         limit: parseInt(limit),
@@ -542,9 +682,58 @@ class OrderController {
       await order.update(updateData, { transaction });
       await transaction.commit();
 
+      // Получаем обновленный заказ с полной информацией
+      const updatedOrder = await Order.findByPk(orderId, {
+        include: [
+          {
+            model: OrderItem,
+            as: "orderItems",
+            include: [
+              {
+                model: Product,
+                as: "product",
+                include: [
+                  {
+                    model: MediaFile,
+                    as: "mediaFiles",
+                    where: { entityType: "product" },
+                    required: false,
+                  },
+                  {
+                    model: ClothingType,
+                    as: "clothingType",
+                    required: false,
+                  },
+                  {
+                    model: Collection,
+                    as: "collection",
+                    required: false,
+                  },
+                ],
+              },
+              {
+                model: Color,
+                as: "selectedColor",
+                required: false,
+              },
+              {
+                model: Size,
+                as: "selectedSize",
+                required: false,
+              },
+            ],
+          },
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "email", "isGuest"],
+          },
+        ],
+      });
+
       return res.json({
         message: "Order status updated successfully",
-        order,
+        order: updatedOrder,
       });
     } catch (e) {
       await transaction.rollback();

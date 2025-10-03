@@ -21,5 +21,8 @@ router.post("/login", detectAuth, dynamicPublicLimiter, userController.login);
 
 router.get("/auth", authMiddleware, userLimiter, userController.auth);
 
+// Создание гостевого пользователя
+router.post("/guest", dynamicPublicLimiter, userController.createGuestUser);
+
 
 module.exports = router;
