@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "src/index.js",
   "scripts": {
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test-email": "node test-email-connection.js"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +20,7 @@
     "jsonwebtoken": "^9.0.2",
     "minio": "^8.0.5",
     "multer": "^2.0.2",
+    "nodemailer": "^7.0.9",
     "pg": "^8.16.3",
     "sequelize": "^6.37.7"
   },

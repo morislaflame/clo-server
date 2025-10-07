@@ -350,9 +350,49 @@ const MediaFile = sequelize.define("media_file", {
     },
   });
 
+  // Модель для кодов подтверждения email
+  const EmailVerification = sequelize.define("email_verification", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    email: { 
+      type: DataTypes.STRING, 
+      allowNull: false,
+      validate: {
+        isEmail: true
+      }
+    },
+    code: { 
+      type: DataTypes.STRING, 
+      allowNull: false,
+      validate: {
+        len: [4, 6] // Код должен быть от 4 до 6 символов
+      }
+    },
+    type: {
+      type: DataTypes.ENUM("REGISTRATION", "PASSWORD_RESET"),
+      allowNull: false,
+      defaultValue: "REGISTRATION"
+    },
+    isUsed: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: () => new Date(Date.now() + 10 * 60 * 1000) // 10 минут
+    },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    }
+  });
+
   User.hasMany(BasketItem, { foreignKey: "userId", as: "basketItems" });
   User.hasMany(MediaFile, { foreignKey: "userId", as: "uploadedFiles" });
   User.hasMany(News, { foreignKey: "authorId", as: "news" });
+  User.hasMany(EmailVerification, { foreignKey: "userId", as: "emailVerifications" });
 
   Product.hasMany(MediaFile, { 
     foreignKey: "entityId", 
@@ -541,4 +581,5 @@ const MediaFile = sequelize.define("media_file", {
     Tag,
     NewsTag,
     MainBanner,
+    EmailVerification,
   };
