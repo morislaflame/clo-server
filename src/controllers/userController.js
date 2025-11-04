@@ -25,49 +25,49 @@ const generateJwt = (user) => {
 };
 
 class UserController {
-  // async registration(req, res, next) {
-  //   const transaction = await sequelize.transaction();
+  async registration(req, res, next) {
+    const transaction = await sequelize.transaction();
 
-  //   try {
-  //     const { email, password } = req.body;
+    try {
+      const { email, password } = req.body;
 
-  //     if (!email || !password) {
-  //       await transaction.rollback();
-  //       return next(ApiError.badRequest("Incorrect email or password"));
-  //     }
+      if (!email || !password) {
+        await transaction.rollback();
+        return next(ApiError.badRequest("Incorrect email or password"));
+      }
 
-  //     const candidate = await User.findOne({ where: { email }, transaction });
+      const candidate = await User.findOne({ where: { email }, transaction });
 
-  //     if (candidate) {
-  //       await transaction.rollback();
-  //       return next(ApiError.badRequest("User with this email already exists"));
-  //     }
+      if (candidate) {
+        await transaction.rollback();
+        return next(ApiError.badRequest("User with this email already exists"));
+      }
 
-  //     const hashPassword = await bcrypt.hash(password, 5);
+      const hashPassword = await bcrypt.hash(password, 5);
 
-  //     // Create the user
-  //     const user = await User.create(
-  //       {
-  //         email,
-  //         password: hashPassword,
-  //         role: "USER",
-  //         dailyRewardAvailable: true,
-  //       },
-  //       { transaction }
-  //     );
+      // Create the user
+      const user = await User.create(
+        {
+          email,
+          password: hashPassword,
+          role: "USER",
+          dailyRewardAvailable: true,
+        },
+        { transaction }
+      );
 
-  //     await transaction.commit();
+      await transaction.commit();
 
-  //     const token = generateJwt(user);
+      const token = generateJwt(user);
 
-  //     return res.json({ token });
-  //   } catch (e) {
-  //     await transaction.rollback();
+      return res.json({ token });
+    } catch (e) {
+      await transaction.rollback();
 
-  //     console.error("Error during registration:", e);
-  //     next(ApiError.internal(e.message));
-  //   }
-  // }
+      console.error("Error during registration:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
 
   async login(req, res, next) {
     try {
@@ -258,6 +258,34 @@ class UserController {
     }
   }
 
+  // Отправка ссылки для сброса пароля
+  async sendPasswordResetLink(req, res, next) {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return next(ApiError.badRequest("Email is required"));
+      }
+
+      // Получаем базовый URL из заголовков или переменных окружения
+      const baseUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
+      
+      const result = await verificationService.sendPasswordResetLink(email, baseUrl);
+      
+      if (!result.success) {
+        return next(ApiError.badRequest(result.error));
+      }
+
+      return res.json({
+        message: "Password reset link sent to your email",
+        expiresAt: result.expiresAt
+      });
+    } catch (e) {
+      console.error("Error sending password reset link:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
+
   // Сброс пароля с подтверждением кода
   async resetPasswordWithVerification(req, res, next) {
     const transaction = await sequelize.transaction();
@@ -299,6 +327,54 @@ class UserController {
     } catch (e) {
       await transaction.rollback();
       console.error("Error during password reset:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
+
+  // Сброс пароля с токеном из ссылки
+  async resetPasswordWithToken(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { email, newPassword, token } = req.body;
+
+      if (!email || !newPassword || !token) {
+        await transaction.rollback();
+        return next(ApiError.badRequest("Email, new password and reset token are required"));
+      }
+
+      // Проверяем токен
+      const verificationResult = await verificationService.verifyResetToken(email, token);
+      
+      if (!verificationResult.success) {
+        await transaction.rollback();
+        return next(ApiError.badRequest(verificationResult.error));
+      }
+
+      // Находим пользователя
+      const user = await User.findOne({ where: { email }, transaction });
+      if (!user) {
+        await transaction.rollback();
+        return next(ApiError.notFound("User not found"));
+      }
+
+      // Хешируем новый пароль
+      const hashPassword = await bcrypt.hash(newPassword, 5);
+
+      // Обновляем пароль
+      await user.update({ password: hashPassword }, { transaction });
+
+      // Помечаем токен как использованный
+      await verificationResult.verification.update({ isUsed: true }, { transaction });
+
+      await transaction.commit();
+
+      return res.json({
+        message: "Password reset successful"
+      });
+    } catch (e) {
+      await transaction.rollback();
+      console.error("Error during password reset with token:", e);
       next(ApiError.internal(e.message));
     }
   }

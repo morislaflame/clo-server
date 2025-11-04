@@ -368,7 +368,7 @@ const MediaFile = sequelize.define("media_file", {
       }
     },
     type: {
-      type: DataTypes.ENUM("REGISTRATION", "PASSWORD_RESET"),
+      type: DataTypes.ENUM("REGISTRATION", "PASSWORD_RESET", "PASSWORD_RESET_LINK"),
       allowNull: false,
       defaultValue: "REGISTRATION"
     },
