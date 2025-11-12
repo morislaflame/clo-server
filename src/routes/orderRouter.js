@@ -8,7 +8,10 @@ const {
   userLimiter,
 } = require("../utilities/ApiLimiter");
 
-// Все маршруты заказов требуют аутентификации
+// Webhook от TipTopPay (не требует аутентификации, проверка подписи внутри контроллера)
+router.post("/webhook/tiptoppay", orderController.handleTipTopPayWebhook);
+
+// Все остальные маршруты заказов требуют аутентификации
 router.use(authMiddleware);
 
 // === ПОЛЬЗОВАТЕЛЬСКИЕ МАРШРУТЫ ===

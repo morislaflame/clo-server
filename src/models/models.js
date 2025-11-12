@@ -219,8 +219,15 @@ const MediaFile = sequelize.define("media_file", {
     recipientPhone: { type: DataTypes.STRING, allowNull: true },
     recipientEmail: { type: DataTypes.STRING, allowNull: true },
     paymentMethod: {
-      type: DataTypes.ENUM("CASH", "CARD", "BANK_TRANSFER"),
+      type: DataTypes.ENUM("TIPTOP_PAY"),
+      defaultValue: "TIPTOP_PAY",
       allowNull: false,
+    },
+    // Поля для TipTopPay
+    tipTopPayTransactionId: { type: DataTypes.STRING, allowNull: true },
+    paymentStatus: {
+      type: DataTypes.ENUM("PENDING", "SUCCESS", "FAILED", "CANCELLED"),
+      allowNull: true,
     },
     totalKZT: { type: DataTypes.INTEGER, allowNull: false },
     totalUSD: { type: DataTypes.INTEGER, allowNull: false },

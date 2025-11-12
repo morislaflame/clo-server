@@ -13,6 +13,7 @@ const {
   BasketItem,
   User,
 } = require("../models/models");
+const tipTopPayService = require("../services/tipTopPayService");
 
 class OrderController {
   // Создание гостевого заказа (без корзины, товары передаются в запросе)
@@ -32,9 +33,9 @@ class OrderController {
       } = req.body;
 
       // Валидация обязательных полей
-      if (!recipientName || !recipientAddress || !paymentMethod || !items || items.length === 0) {
+      if (!recipientName || !recipientAddress || !items || items.length === 0) {
         await transaction.rollback();
-        return next(ApiError.badRequest("Recipient name, address, payment method and items are required"));
+        return next(ApiError.badRequest("Recipient name, address and items are required"));
       }
 
       // Подсчитываем общую стоимость и проверяем товары
@@ -66,11 +67,12 @@ class OrderController {
           recipientAddress,
           recipientPhone,
           recipientEmail,
-          paymentMethod,
+          paymentMethod: "TIPTOP_PAY",
           totalKZT,
           totalUSD,
           notes: notes || null,
           status: "CREATED",
+          paymentStatus: "PENDING",
         },
         { transaction }
       );
@@ -139,9 +141,17 @@ class OrderController {
         ],
       });
 
+      // Возвращаем данные для виджета TipTopPay
       return res.json({
         message: "Order created successfully",
         order: createdOrder,
+        paymentData: {
+          publicId: tipTopPayService.publicId,
+          orderId: order.id,
+          amount: totalKZT, // Сумма в тенге
+          currency: "KZT",
+          description: `Оплата заказа #${order.id}`,
+        },
       });
     } catch (e) {
       await transaction.rollback();
@@ -164,9 +174,9 @@ class OrderController {
       } = req.body;
 
       // Валидация обязательных полей
-      if (!recipientName || !recipientAddress || !paymentMethod) {
+      if (!recipientName || !recipientAddress) {
         await transaction.rollback();
-        return next(ApiError.badRequest("Recipient name, address and payment method are required"));
+        return next(ApiError.badRequest("Recipient name and address are required"));
       }
 
       // Получаем все товары из корзины пользователя
@@ -231,11 +241,12 @@ class OrderController {
           userId,
           recipientName,
           recipientAddress,
-          paymentMethod,
+          paymentMethod: "TIPTOP_PAY",
           totalKZT,
           totalUSD,
           notes: notes || null,
           status: "CREATED",
+          paymentStatus: "PENDING",
         },
         { transaction }
       );
@@ -308,9 +319,17 @@ class OrderController {
         ],
       });
 
+      // Возвращаем данные для виджета TipTopPay
       return res.json({
         message: "Order created successfully",
         order: createdOrder,
+        paymentData: {
+          publicId: tipTopPayService.publicId,
+          orderId: order.id,
+          amount: totalKZT, // Сумма в тенге
+          currency: "KZT",
+          description: `Оплата заказа #${order.id}`,
+        },
       });
     } catch (e) {
       await transaction.rollback();
@@ -798,6 +817,87 @@ class OrderController {
     } catch (e) {
       console.error("Error getting order stats:", e);
       next(ApiError.internal(e.message));
+    }
+  }
+
+  // Обработка webhook от TipTopPay
+  async handleTipTopPayWebhook(req, res, next) {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const notificationData = req.body;
+      const signature = req.headers['x-signature'] || req.headers['signature'];
+
+      // Проверяем подпись уведомления
+      if (!tipTopPayService.verifyNotificationSignature(notificationData, signature)) {
+        await transaction.rollback();
+        console.error('Invalid webhook signature');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+
+      const { type, transactionId, orderId, status, amount } = notificationData;
+
+      // Находим заказ
+      const order = await Order.findByPk(orderId, { transaction });
+
+      if (!order) {
+        await transaction.rollback();
+        console.error(`Order ${orderId} not found for webhook`);
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      // Обновляем данные о платеже
+      const updateData = {
+        tipTopPayTransactionId: transactionId,
+      };
+
+      // Обрабатываем разные типы уведомлений
+      switch (type) {
+        case 'pay':
+          if (status === 'success') {
+            updateData.paymentStatus = 'SUCCESS';
+            updateData.status = 'PAID';
+          } else if (status === 'failed') {
+            updateData.paymentStatus = 'FAILED';
+          }
+          break;
+
+        case 'confirm':
+          if (status === 'success') {
+            updateData.paymentStatus = 'SUCCESS';
+            updateData.status = 'PAID';
+          }
+          break;
+
+        case 'fail':
+          updateData.paymentStatus = 'FAILED';
+          break;
+
+        case 'cancel':
+          updateData.paymentStatus = 'CANCELLED';
+          break;
+
+        case 'refund':
+          // При возврате можно обновить статус заказа
+          if (status === 'success') {
+            updateData.paymentStatus = 'CANCELLED';
+          }
+          break;
+
+        default:
+          console.log(`Unknown webhook type: ${type}`);
+      }
+
+      await order.update(updateData, { transaction });
+      await transaction.commit();
+
+      // Возвращаем успешный ответ TipTopPay
+      return res.json({ success: true });
+    } catch (e) {
+      await transaction.rollback();
+      console.error("Error handling TipTopPay webhook:", e);
+      // Все равно возвращаем успех, чтобы TipTopPay не повторял запрос
+      return res.json({ success: false, error: e.message });
     }
   }
 }
