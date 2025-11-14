@@ -952,13 +952,29 @@ class OrderController {
       }
 
       console.log('Update data:', updateData);
-      await order.update(updateData, { transaction });
+      
+      // Обновляем заказ
+      const [updatedRowsCount] = await order.update(updateData, { transaction });
+
+      if (updatedRowsCount === 0) {
+        await transaction.rollback();
+        console.error(`Failed to update order ${orderId}`);
+        return res.status(500).json({ success: false, error: 'Failed to update order' });
+      }
+
       await transaction.commit();
 
-      console.log(`Order ${order.id} updated successfully. New status: ${updateData.status || order.status}`);
+      // Проверяем обновленный заказ
+      const updatedOrder = await Order.findByPk(orderId);
+      if (updatedOrder) {
+        console.log(`Order ${order.id} updated successfully. New status: ${updatedOrder.status}, paymentStatus: ${updatedOrder.paymentStatus}`);
+      } else {
+        console.warn(`Could not fetch updated order ${orderId} for verification`);
+      }
 
       // Возвращаем успешный ответ TipTopPay
-      return res.json({ success: true });
+      // Важно: HTTP 200 означает успешную обработку уведомления
+      return res.status(200).json({ success: true });
     } catch (e) {
       await transaction.rollback();
       console.error("Error handling TipTopPay webhook:", e);
