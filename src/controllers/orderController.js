@@ -153,7 +153,7 @@ class OrderController {
         paymentData: {
           publicId: tipTopPayService.publicId,
           orderId: order.id,
-          amount: totalKZT, // Сумма в тенге
+          amount: totalKZT * 100, // Сумма в тенге
           currency: "KZT",
           description: `Оплата заказа #${order.id}`,
         },
@@ -330,7 +330,7 @@ class OrderController {
         paymentData: {
           publicId: tipTopPayService.publicId,
           orderId: order.id,
-          amount: totalKZT, // Сумма в тенге
+          amount: totalKZT * 100, // Сумма в тенге
           currency: "KZT",
           description: `Оплата заказа #${order.id}`,
         },
