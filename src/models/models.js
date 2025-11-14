@@ -205,7 +205,7 @@ const MediaFile = sequelize.define("media_file", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
       references: { model: "users", key: "id" },
     },
     status: {

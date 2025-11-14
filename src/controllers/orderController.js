@@ -21,13 +21,12 @@ class OrderController {
     const transaction = await sequelize.transaction();
 
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id || null;
       const { 
         recipientName, 
         recipientAddress,
         recipientPhone,
         recipientEmail,
-        paymentMethod, 
         notes,
         items // Массив товаров из локальной корзины
       } = req.body;
@@ -37,6 +36,12 @@ class OrderController {
         await transaction.rollback();
         return next(ApiError.badRequest("Recipient name, address and items are required"));
       }
+
+       // Для гостевых заказов обязательны email и телефон
+    if (!userId && (!recipientPhone || !recipientEmail)) {
+      await transaction.rollback();
+      return next(ApiError.badRequest("Phone and email are required for guest orders"));
+    }
 
       // Подсчитываем общую стоимость и проверяем товары
       let totalKZT = 0;
@@ -169,7 +174,6 @@ class OrderController {
       const { 
         recipientName, 
         recipientAddress, 
-        paymentMethod, 
         notes 
       } = req.body;
 

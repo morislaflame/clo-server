@@ -7,17 +7,18 @@ const {
   adminLimiter,
   userLimiter,
 } = require("../utilities/ApiLimiter");
+const detectAuthMiddleware = require("../middlewares/detectAuthMiddleware");
 
 // Webhook от TipTopPay (не требует аутентификации, проверка подписи внутри контроллера)
 router.post("/webhook/tiptoppay", orderController.handleTipTopPayWebhook);
+
+// Создание гостевого заказа (не требует обязательной аутентификации)
+router.post("/guest", detectAuthMiddleware, userLimiter, orderController.createGuestOrder);
 
 // Все остальные маршруты заказов требуют аутентификации
 router.use(authMiddleware);
 
 // === ПОЛЬЗОВАТЕЛЬСКИЕ МАРШРУТЫ ===
-
-// Создание гостевого заказа (товары передаются в запросе)
-router.post("/guest", userLimiter, orderController.createGuestOrder);
 
 // Создание заказа из корзины
 router.post("/create", userLimiter, orderController.createOrder);
