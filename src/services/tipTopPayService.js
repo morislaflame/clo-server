@@ -259,14 +259,26 @@ class TipTopPayService {
 
   /**
    * Проверка подписи уведомления от TipTopPay
-   * @param {Object} notificationData - Данные уведомления
-   * @param {string} signature - Подпись из заголовка
+   * @param {Object} notificationData - Данные уведомления (form-urlencoded)
+   * @param {string} signature - Подпись из заголовка (base64)
    * @returns {boolean} - Валидность подписи
    */
   verifyNotificationSignature(notificationData, signature) {
     try {
-      const calculatedSignature = this.generateSignature(notificationData);
-      return calculatedSignature === signature;
+      // Для form-urlencoded данных нужно правильно сформировать строку
+      // TipTopPay использует URL decoded параметры для X-Content-HMAC
+      const sortedKeys = Object.keys(notificationData).sort();
+      const stringToSign = sortedKeys
+        .map(key => `${key}=${notificationData[key]}`)
+        .join('&');
+      
+      // Вычисляем HMAC SHA256 и кодируем в base64
+      const hmac = crypto
+        .createHmac('sha256', this.apiKey)
+        .update(stringToSign, 'utf8')
+        .digest('base64');
+      
+      return hmac === signature;
     } catch (error) {
       console.error('Error verifying notification signature:', error);
       return false;

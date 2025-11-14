@@ -829,44 +829,26 @@ class OrderController {
     const transaction = await sequelize.transaction();
 
     try {
-      // Логируем входящий webhook для отладки
       console.log('=== TipTopPay Webhook Received ===');
       console.log('Timestamp:', new Date().toISOString());
-      console.log('Headers:', JSON.stringify(req.headers, null, 2));
-      console.log('Body type:', typeof req.body);
-      console.log('Body:', req.body);
-      console.log('Raw body:', JSON.stringify(req.body, null, 2));
       
-      // TipTopPay отправляет данные в формате form-urlencoded
-      // Express автоматически парсит их в объект
       const notificationData = req.body;
+      const signature = req.headers['x-content-hmac'] || req.headers['content-hmac'];
       
-      // Подпись приходит в заголовках content-hmac или x-content-hmac
-      const signature = req.headers['x-content-hmac'] || req.headers['content-hmac'] || req.headers['x-signature'] || req.headers['signature'];
-
-      console.log('Signature from headers:', signature);
-
       // Проверяем, что данные пришли
       if (!notificationData || Object.keys(notificationData).length === 0) {
         await transaction.rollback();
         console.error('Empty notification data received');
-        return res.status(400).json({ error: 'Empty notification data' });
+        return res.json({ code: 13 }); // Платеж не может быть принят
       }
 
       // Временно логируем проверку подписи (для отладки)
       if (signature) {
         const isValid = tipTopPayService.verifyNotificationSignature(notificationData, signature);
         console.log('Signature validation result:', isValid);
-        console.log('Received signature:', signature);
-        
         if (!isValid) {
-          const calculatedSignature = tipTopPayService.generateSignature(notificationData);
-          console.log('Calculated signature:', calculatedSignature);
-          console.log('Notification data keys:', Object.keys(notificationData).sort());
-          console.log('Notification data values:', Object.values(notificationData));
+          console.warn('Invalid signature, but continuing for debugging');
         }
-      } else {
-        console.warn('No signature header found');
       }
 
       // ВРЕМЕННО: Отключаем проверку подписи для отладки
@@ -874,108 +856,167 @@ class OrderController {
       // if (!signature || !tipTopPayService.verifyNotificationSignature(notificationData, signature)) {
       //   await transaction.rollback();
       //   console.error('Invalid webhook signature');
-      //   return res.status(401).json({ error: 'Invalid signature' });
+      //   return res.json({ code: 13 }); // Платеж не может быть принят
       // }
 
-      // TipTopPay отправляет данные в формате:
-      // InvoiceId - это externalId (ID заказа в нашей системе)
-      // OperationType - тип операции (Payment, Refund и т.д.)
-      // Status - статус операции (Completed, Failed и т.д.)
-      // TransactionId - ID транзакции в TipTopPay
-      const operationType = notificationData.OperationType || notificationData.operationType || notificationData.type || notificationData.Type;
-      const transactionId = notificationData.TransactionId || notificationData.transactionId;
-      // InvoiceId - это старое название externalId в TipTopPay
-      const externalId = notificationData.InvoiceId || notificationData.invoiceId || notificationData.externalId || notificationData.ExternalId || notificationData.external_id;
+      // Определяем тип уведомления по наличию специфичных полей
+      const operationType = notificationData.OperationType || notificationData.operationType;
       const status = notificationData.Status || notificationData.status;
-      const amount = notificationData.Amount || notificationData.amount || notificationData.PaymentAmount || notificationData.paymentAmount;
+      const hasReason = notificationData.Reason || notificationData.ReasonCode;
+      const hasPaymentTransactionId = notificationData.PaymentTransactionId;
       
-      console.log('Webhook parsed data:', { operationType, transactionId, externalId, status, amount });
-      console.log('All notification keys:', Object.keys(notificationData));
+      // Check уведомление - приходит ДО оплаты, требует проверки
+      // Отличается тем, что имеет Status='Authorized' или Status='Completed' но без AuthCode
+      const isCheckNotification = (status === 'Authorized' || (status === 'Completed' && !notificationData.AuthCode)) && 
+                                   operationType === 'Payment';
+      
+      // Pay уведомление - успешная оплата (имеет AuthCode)
+      const isPayNotification = status === 'Completed' && 
+                                operationType === 'Payment' &&
+                                notificationData.AuthCode;
+      
+      // Fail уведомление - отклоненный платеж (имеет Reason или ReasonCode)
+      const isFailNotification = hasReason;
+      
+      // Confirm уведомление - подтверждение двухстадийного платежа
+      const isConfirmNotification = operationType === 'Confirm' || 
+                                     (status === 'Completed' && operationType === 'Payment' && notificationData.AuthCode && !isPayNotification);
+      
+      // Refund уведомление - возврат (имеет PaymentTransactionId или OperationType='Refund')
+      const isRefundNotification = operationType === 'Refund' || hasPaymentTransactionId;
+      
+      // Cancel уведомление - отмена
+      const isCancelNotification = operationType === 'Cancel';
 
+      const externalId = notificationData.InvoiceId || notificationData.invoiceId;
+      
       if (!externalId) {
         await transaction.rollback();
-        console.error('No InvoiceId/externalId in webhook data. Available keys:', Object.keys(notificationData));
-        console.error('Full notification data:', notificationData);
-        return res.status(400).json({ error: 'InvoiceId/externalId is required' });
+        console.error('No InvoiceId in webhook data');
+        // Для Check уведомления возвращаем код 10 (Неверный номер заказа)
+        if (isCheckNotification) {
+          return res.json({ code: 10 });
+        }
+        return res.json({ code: 10 });
       }
 
-      // Находим заказ по externalId (который мы передали при создании платежа)
       const orderId = parseInt(externalId);
       const order = await Order.findByPk(orderId, { transaction });
 
       if (!order) {
         await transaction.rollback();
-        console.error(`Order ${orderId} not found for webhook`);
-        return res.status(404).json({ error: 'Order not found' });
+        console.error(`Order ${orderId} not found`);
+        // Для Check уведомления возвращаем код 10
+        if (isCheckNotification) {
+          return res.json({ code: 10 });
+        }
+        return res.json({ code: 10 });
       }
 
-      console.log(`Found order ${order.id} with current status: ${order.status}, paymentStatus: ${order.paymentStatus}`);
+      console.log(`Found order ${order.id}, notification type: Check=${isCheckNotification}, Pay=${isPayNotification}, Fail=${isFailNotification}`);
 
-      // Обновляем данные о платеже
-      const updateData = {
-        tipTopPayTransactionId: transactionId,
-      };
-
-      // Обрабатываем разные типы операций и статусы
-      // OperationType может быть: Payment, Refund, Cancel и т.д.
-      // Status может быть: Completed, Failed, Cancelled и т.д.
-      if (operationType === 'Payment' || operationType === 'payment') {
-        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
-          updateData.paymentStatus = 'SUCCESS';
-          updateData.status = 'PAID';
-          console.log('Payment completed successfully, updating order to PAID');
-        } else if (status === 'Failed' || status === 'failed') {
-          updateData.paymentStatus = 'FAILED';
-          console.log('Payment failed');
-        } else if (status === 'Cancelled' || status === 'cancelled') {
-          updateData.paymentStatus = 'CANCELLED';
-          console.log('Payment cancelled');
+      // Обработка Check уведомления (до оплаты - проверка возможности провести платеж)
+      if (isCheckNotification) {
+        // Проверяем сумму и другие параметры
+        const amount = parseFloat(notificationData.Amount || notificationData.PaymentAmount || 0);
+        const orderAmount = order.totalKZT;
+        
+        // Проверка суммы (с небольшой погрешностью для округления)
+        if (Math.abs(amount - orderAmount) > 0.01) {
+          await transaction.rollback();
+          console.error(`Amount mismatch: expected ${orderAmount}, got ${amount}`);
+          return res.json({ code: 12 }); // Неверная сумма
         }
-      } else if (operationType === 'Refund' || operationType === 'refund') {
-        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
-          updateData.paymentStatus = 'CANCELLED';
-          console.log('Refund completed successfully');
-        }
-      } else if (operationType === 'Cancel' || operationType === 'cancel') {
-        updateData.paymentStatus = 'CANCELLED';
-        console.log('Payment cancelled');
-      } else {
-        // Для обратной совместимости с другими форматами уведомлений
-        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
-          updateData.paymentStatus = 'SUCCESS';
-          updateData.status = 'PAID';
-          console.log(`Operation ${operationType} completed, updating order to PAID`);
-        } else if (status === 'Failed' || status === 'failed') {
-          updateData.paymentStatus = 'FAILED';
-          console.log(`Operation ${operationType} failed`);
-        }
+        
+        // Все проверки пройдены - разрешаем платеж
+        await transaction.commit();
+        console.log(`Check notification passed for order ${order.id}`);
+        return res.json({ code: 0 }); // Платеж может быть проведен
       }
 
-      console.log('Update data:', updateData);
-      
-      // Обновляем заказ (метод экземпляра возвращает сам обновленный экземпляр)
-      const updatedOrder = await order.update(updateData, { transaction });
-
-      if (!updatedOrder) {
-        await transaction.rollback();
-        console.error(`Failed to update order ${orderId}`);
-        return res.status(500).json({ success: false, error: 'Failed to update order' });
+      // Обработка Pay уведомления (успешная оплата)
+      if (isPayNotification) {
+        const updateData = {
+          tipTopPayTransactionId: notificationData.TransactionId,
+          paymentStatus: 'SUCCESS',
+          status: 'PAID',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Pay notification: Order ${order.id} updated to PAID`);
+        return res.json({ code: 0 }); // Платеж зарегистрирован
       }
 
+      // Обработка Fail уведомления (отклоненный платеж)
+      if (isFailNotification) {
+        const updateData = {
+          tipTopPayTransactionId: notificationData.TransactionId,
+          paymentStatus: 'FAILED',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Fail notification: Order ${order.id} marked as FAILED. Reason: ${notificationData.Reason || notificationData.ReasonCode}`);
+        return res.json({ code: 0 }); // Попытка зарегистрирована
+      }
+
+      // Обработка Confirm уведомления (подтверждение двухстадийного платежа)
+      if (isConfirmNotification) {
+        const updateData = {
+          tipTopPayTransactionId: notificationData.TransactionId,
+          paymentStatus: 'SUCCESS',
+          status: 'PAID',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Confirm notification: Order ${order.id} confirmed and updated to PAID`);
+        return res.json({ code: 0 }); // Платеж зарегистрирован
+      }
+
+      // Обработка Refund уведомления (возврат)
+      if (isRefundNotification) {
+        const updateData = {
+          paymentStatus: 'CANCELLED',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Refund notification: Order ${order.id} refunded`);
+        return res.json({ code: 0 }); // Возврат зарегистрирован
+      }
+
+      // Обработка Cancel уведомления (отмена)
+      if (isCancelNotification) {
+        const updateData = {
+          paymentStatus: 'CANCELLED',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Cancel notification: Order ${order.id} cancelled`);
+        return res.json({ code: 0 }); // Отмена зарегистрирована
+      }
+
+      // Обработка по OperationType для обратной совместимости
+      if (operationType === 'Payment' && status === 'Completed') {
+        const updateData = {
+          tipTopPayTransactionId: notificationData.TransactionId,
+          paymentStatus: 'SUCCESS',
+          status: 'PAID',
+        };
+        await order.update(updateData, { transaction });
+        await transaction.commit();
+        console.log(`Payment completed (fallback): Order ${order.id} updated to PAID`);
+        return res.json({ code: 0 });
+      }
+
+      // Если тип уведомления не определен, все равно возвращаем успех
       await transaction.commit();
-
-      // Логируем обновленный заказ
-      console.log(`Order ${updatedOrder.id} updated successfully. New status: ${updatedOrder.status}, paymentStatus: ${updatedOrder.paymentStatus}`);
-
-      // Возвращаем успешный ответ TipTopPay
-      // Важно: HTTP 200 означает успешную обработку уведомления
-      return res.status(200).json({ success: true });
+      console.log(`Unknown notification type processed for order ${order.id}`);
+      return res.json({ code: 0 });
+      
     } catch (e) {
       await transaction.rollback();
       console.error("Error handling TipTopPay webhook:", e);
       console.error("Stack:", e.stack);
-      // Возвращаем ошибку, чтобы TipTopPay знал о проблеме
-      return res.status(500).json({ success: false, error: e.message });
+      return res.json({ code: 13 }); // Платеж не может быть принят
     }
   }
 }
