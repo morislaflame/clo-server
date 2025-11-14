@@ -953,10 +953,10 @@ class OrderController {
 
       console.log('Update data:', updateData);
       
-      // Обновляем заказ
-      const [updatedRowsCount] = await order.update(updateData, { transaction });
+      // Обновляем заказ (метод экземпляра возвращает сам обновленный экземпляр)
+      const updatedOrder = await order.update(updateData, { transaction });
 
-      if (updatedRowsCount === 0) {
+      if (!updatedOrder) {
         await transaction.rollback();
         console.error(`Failed to update order ${orderId}`);
         return res.status(500).json({ success: false, error: 'Failed to update order' });
@@ -964,13 +964,8 @@ class OrderController {
 
       await transaction.commit();
 
-      // Проверяем обновленный заказ
-      const updatedOrder = await Order.findByPk(orderId);
-      if (updatedOrder) {
-        console.log(`Order ${order.id} updated successfully. New status: ${updatedOrder.status}, paymentStatus: ${updatedOrder.paymentStatus}`);
-      } else {
-        console.warn(`Could not fetch updated order ${orderId} for verification`);
-      }
+      // Логируем обновленный заказ
+      console.log(`Order ${updatedOrder.id} updated successfully. New status: ${updatedOrder.status}, paymentStatus: ${updatedOrder.paymentStatus}`);
 
       // Возвращаем успешный ответ TipTopPay
       // Важно: HTTP 200 означает успешную обработку уведомления
