@@ -877,22 +877,26 @@ class OrderController {
       //   return res.status(401).json({ error: 'Invalid signature' });
       // }
 
-      // TipTopPay отправляет externalId, а не orderId
-      // Также данные могут быть в разных форматах (строки/числа)
-      const type = notificationData.type || notificationData.Type;
-      const transactionId = notificationData.transactionId || notificationData.TransactionId;
-      const externalId = notificationData.externalId || notificationData.ExternalId || notificationData.external_id;
-      const status = notificationData.status || notificationData.Status;
-      const amount = notificationData.amount || notificationData.Amount;
+      // TipTopPay отправляет данные в формате:
+      // InvoiceId - это externalId (ID заказа в нашей системе)
+      // OperationType - тип операции (Payment, Refund и т.д.)
+      // Status - статус операции (Completed, Failed и т.д.)
+      // TransactionId - ID транзакции в TipTopPay
+      const operationType = notificationData.OperationType || notificationData.operationType || notificationData.type || notificationData.Type;
+      const transactionId = notificationData.TransactionId || notificationData.transactionId;
+      // InvoiceId - это старое название externalId в TipTopPay
+      const externalId = notificationData.InvoiceId || notificationData.invoiceId || notificationData.externalId || notificationData.ExternalId || notificationData.external_id;
+      const status = notificationData.Status || notificationData.status;
+      const amount = notificationData.Amount || notificationData.amount || notificationData.PaymentAmount || notificationData.paymentAmount;
       
-      console.log('Webhook parsed data:', { type, transactionId, externalId, status, amount });
+      console.log('Webhook parsed data:', { operationType, transactionId, externalId, status, amount });
       console.log('All notification keys:', Object.keys(notificationData));
 
       if (!externalId) {
         await transaction.rollback();
-        console.error('No externalId in webhook data. Available keys:', Object.keys(notificationData));
+        console.error('No InvoiceId/externalId in webhook data. Available keys:', Object.keys(notificationData));
         console.error('Full notification data:', notificationData);
-        return res.status(400).json({ error: 'externalId is required' });
+        return res.status(400).json({ error: 'InvoiceId/externalId is required' });
       }
 
       // Находим заказ по externalId (который мы передали при создании платежа)
@@ -912,46 +916,39 @@ class OrderController {
         tipTopPayTransactionId: transactionId,
       };
 
-      // Обрабатываем разные типы уведомлений
-      switch (type) {
-        case 'pay':
-          if (status === 'success' || status === 'Success') {
-            updateData.paymentStatus = 'SUCCESS';
-            updateData.status = 'PAID';
-            console.log('Payment successful, updating order to PAID');
-          } else if (status === 'failed' || status === 'Failed') {
-            updateData.paymentStatus = 'FAILED';
-            console.log('Payment failed');
-          }
-          break;
-
-        case 'confirm':
-          if (status === 'success' || status === 'Success') {
-            updateData.paymentStatus = 'SUCCESS';
-            updateData.status = 'PAID';
-            console.log('Payment confirmed, updating order to PAID');
-          }
-          break;
-
-        case 'fail':
+      // Обрабатываем разные типы операций и статусы
+      // OperationType может быть: Payment, Refund, Cancel и т.д.
+      // Status может быть: Completed, Failed, Cancelled и т.д.
+      if (operationType === 'Payment' || operationType === 'payment') {
+        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
+          updateData.paymentStatus = 'SUCCESS';
+          updateData.status = 'PAID';
+          console.log('Payment completed successfully, updating order to PAID');
+        } else if (status === 'Failed' || status === 'failed') {
           updateData.paymentStatus = 'FAILED';
           console.log('Payment failed');
-          break;
-
-        case 'cancel':
+        } else if (status === 'Cancelled' || status === 'cancelled') {
           updateData.paymentStatus = 'CANCELLED';
           console.log('Payment cancelled');
-          break;
-
-        case 'refund':
-          if (status === 'success' || status === 'Success') {
-            updateData.paymentStatus = 'CANCELLED';
-            console.log('Refund successful');
-          }
-          break;
-
-        default:
-          console.log(`Unknown webhook type: ${type}, status: ${status}`);
+        }
+      } else if (operationType === 'Refund' || operationType === 'refund') {
+        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
+          updateData.paymentStatus = 'CANCELLED';
+          console.log('Refund completed successfully');
+        }
+      } else if (operationType === 'Cancel' || operationType === 'cancel') {
+        updateData.paymentStatus = 'CANCELLED';
+        console.log('Payment cancelled');
+      } else {
+        // Для обратной совместимости с другими форматами уведомлений
+        if (status === 'Completed' || status === 'completed' || status === 'success' || status === 'Success') {
+          updateData.paymentStatus = 'SUCCESS';
+          updateData.status = 'PAID';
+          console.log(`Operation ${operationType} completed, updating order to PAID`);
+        } else if (status === 'Failed' || status === 'failed') {
+          updateData.paymentStatus = 'FAILED';
+          console.log(`Operation ${operationType} failed`);
+        }
       }
 
       console.log('Update data:', updateData);
