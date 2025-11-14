@@ -16,7 +16,10 @@ app.use(
     credentials: true,
   })
 );
+// Парсинг JSON
 app.use(express.json());
+// Парсинг form-urlencoded (для webhook от TipTopPay)
+app.use(express.urlencoded({ extended: true }));
 app.use("/api", router);
 
 // Настраиваем маршрут для вебхука

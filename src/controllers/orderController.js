@@ -825,128 +825,151 @@ class OrderController {
   }
 
   // Обработка webhook от TipTopPay
-  // Обработка webhook от TipTopPay
-async handleTipTopPayWebhook(req, res, next) {
-  const transaction = await sequelize.transaction();
+  async handleTipTopPayWebhook(req, res, next) {
+    const transaction = await sequelize.transaction();
 
-  try {
-    // Логируем входящий webhook для отладки
-    console.log('=== TipTopPay Webhook Received ===');
-    console.log('Timestamp:', new Date().toISOString());
-    console.log('Headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-    
-    const notificationData = req.body;
-    const signature = req.headers['x-signature'] || req.headers['signature'] || req.headers['X-Signature'];
-
-    // Временно логируем проверку подписи (для отладки)
-    if (signature) {
-      const isValid = tipTopPayService.verifyNotificationSignature(notificationData, signature);
-      console.log('Signature validation result:', isValid);
-      console.log('Received signature:', signature);
+    try {
+      // Логируем входящий webhook для отладки
+      console.log('=== TipTopPay Webhook Received ===');
+      console.log('Timestamp:', new Date().toISOString());
+      console.log('Headers:', JSON.stringify(req.headers, null, 2));
+      console.log('Body type:', typeof req.body);
+      console.log('Body:', req.body);
+      console.log('Raw body:', JSON.stringify(req.body, null, 2));
       
-      if (!isValid) {
-        const calculatedSignature = tipTopPayService.generateSignature(notificationData);
-        console.log('Calculated signature:', calculatedSignature);
-        console.log('Notification data keys:', Object.keys(notificationData).sort());
+      // TipTopPay отправляет данные в формате form-urlencoded
+      // Express автоматически парсит их в объект
+      const notificationData = req.body;
+      
+      // Подпись приходит в заголовках content-hmac или x-content-hmac
+      const signature = req.headers['x-content-hmac'] || req.headers['content-hmac'] || req.headers['x-signature'] || req.headers['signature'];
+
+      console.log('Signature from headers:', signature);
+
+      // Проверяем, что данные пришли
+      if (!notificationData || Object.keys(notificationData).length === 0) {
+        await transaction.rollback();
+        console.error('Empty notification data received');
+        return res.status(400).json({ error: 'Empty notification data' });
       }
-    } else {
-      console.warn('No signature header found in:', Object.keys(req.headers));
-    }
 
-    // ВРЕМЕННО: Отключаем проверку подписи для отладки
-    // Раскомментируйте после того, как убедитесь, что webhook работает
-    // if (!signature || !tipTopPayService.verifyNotificationSignature(notificationData, signature)) {
-    //   await transaction.rollback();
-    //   console.error('Invalid webhook signature');
-    //   return res.status(401).json({ error: 'Invalid signature' });
-    // }
+      // Временно логируем проверку подписи (для отладки)
+      if (signature) {
+        const isValid = tipTopPayService.verifyNotificationSignature(notificationData, signature);
+        console.log('Signature validation result:', isValid);
+        console.log('Received signature:', signature);
+        
+        if (!isValid) {
+          const calculatedSignature = tipTopPayService.generateSignature(notificationData);
+          console.log('Calculated signature:', calculatedSignature);
+          console.log('Notification data keys:', Object.keys(notificationData).sort());
+          console.log('Notification data values:', Object.values(notificationData));
+        }
+      } else {
+        console.warn('No signature header found');
+      }
 
-    // ВАЖНО: TipTopPay отправляет externalId, а не orderId!
-    const { type, transactionId, externalId, status, amount } = notificationData;
-    
-    console.log('Webhook parsed data:', { type, transactionId, externalId, status, amount });
+      // ВРЕМЕННО: Отключаем проверку подписи для отладки
+      // Раскомментируйте после того, как убедитесь, что webhook работает
+      // if (!signature || !tipTopPayService.verifyNotificationSignature(notificationData, signature)) {
+      //   await transaction.rollback();
+      //   console.error('Invalid webhook signature');
+      //   return res.status(401).json({ error: 'Invalid signature' });
+      // }
 
-    if (!externalId) {
-      await transaction.rollback();
-      console.error('No externalId in webhook data. Available keys:', Object.keys(notificationData));
-      return res.status(400).json({ error: 'externalId is required' });
-    }
+      // TipTopPay отправляет externalId, а не orderId
+      // Также данные могут быть в разных форматах (строки/числа)
+      const type = notificationData.type || notificationData.Type;
+      const transactionId = notificationData.transactionId || notificationData.TransactionId;
+      const externalId = notificationData.externalId || notificationData.ExternalId || notificationData.external_id;
+      const status = notificationData.status || notificationData.Status;
+      const amount = notificationData.amount || notificationData.Amount;
+      
+      console.log('Webhook parsed data:', { type, transactionId, externalId, status, amount });
+      console.log('All notification keys:', Object.keys(notificationData));
 
-    // Находим заказ по externalId (который мы передали при создании платежа)
-    const order = await Order.findByPk(parseInt(externalId), { transaction });
+      if (!externalId) {
+        await transaction.rollback();
+        console.error('No externalId in webhook data. Available keys:', Object.keys(notificationData));
+        console.error('Full notification data:', notificationData);
+        return res.status(400).json({ error: 'externalId is required' });
+      }
 
-    if (!order) {
-      await transaction.rollback();
-      console.error(`Order ${externalId} not found for webhook`);
-      return res.status(404).json({ error: 'Order not found' });
-    }
+      // Находим заказ по externalId (который мы передали при создании платежа)
+      const orderId = parseInt(externalId);
+      const order = await Order.findByPk(orderId, { transaction });
 
-    console.log(`Found order ${order.id} with current status: ${order.status}, paymentStatus: ${order.paymentStatus}`);
+      if (!order) {
+        await transaction.rollback();
+        console.error(`Order ${orderId} not found for webhook`);
+        return res.status(404).json({ error: 'Order not found' });
+      }
 
-    // Обновляем данные о платеже
-    const updateData = {
-      tipTopPayTransactionId: transactionId,
-    };
+      console.log(`Found order ${order.id} with current status: ${order.status}, paymentStatus: ${order.paymentStatus}`);
 
-    // Обрабатываем разные типы уведомлений
-    switch (type) {
-      case 'pay':
-        if (status === 'success' || status === 'Success') {
-          updateData.paymentStatus = 'SUCCESS';
-          updateData.status = 'PAID';
-          console.log('Payment successful, updating order to PAID');
-        } else if (status === 'failed' || status === 'Failed') {
+      // Обновляем данные о платеже
+      const updateData = {
+        tipTopPayTransactionId: transactionId,
+      };
+
+      // Обрабатываем разные типы уведомлений
+      switch (type) {
+        case 'pay':
+          if (status === 'success' || status === 'Success') {
+            updateData.paymentStatus = 'SUCCESS';
+            updateData.status = 'PAID';
+            console.log('Payment successful, updating order to PAID');
+          } else if (status === 'failed' || status === 'Failed') {
+            updateData.paymentStatus = 'FAILED';
+            console.log('Payment failed');
+          }
+          break;
+
+        case 'confirm':
+          if (status === 'success' || status === 'Success') {
+            updateData.paymentStatus = 'SUCCESS';
+            updateData.status = 'PAID';
+            console.log('Payment confirmed, updating order to PAID');
+          }
+          break;
+
+        case 'fail':
           updateData.paymentStatus = 'FAILED';
           console.log('Payment failed');
-        }
-        break;
+          break;
 
-      case 'confirm':
-        if (status === 'success' || status === 'Success') {
-          updateData.paymentStatus = 'SUCCESS';
-          updateData.status = 'PAID';
-          console.log('Payment confirmed, updating order to PAID');
-        }
-        break;
-
-      case 'fail':
-        updateData.paymentStatus = 'FAILED';
-        console.log('Payment failed');
-        break;
-
-      case 'cancel':
-        updateData.paymentStatus = 'CANCELLED';
-        console.log('Payment cancelled');
-        break;
-
-      case 'refund':
-        if (status === 'success' || status === 'Success') {
+        case 'cancel':
           updateData.paymentStatus = 'CANCELLED';
-          console.log('Refund successful');
-        }
-        break;
+          console.log('Payment cancelled');
+          break;
 
-      default:
-        console.log(`Unknown webhook type: ${type}, status: ${status}`);
+        case 'refund':
+          if (status === 'success' || status === 'Success') {
+            updateData.paymentStatus = 'CANCELLED';
+            console.log('Refund successful');
+          }
+          break;
+
+        default:
+          console.log(`Unknown webhook type: ${type}, status: ${status}`);
+      }
+
+      console.log('Update data:', updateData);
+      await order.update(updateData, { transaction });
+      await transaction.commit();
+
+      console.log(`Order ${order.id} updated successfully. New status: ${updateData.status || order.status}`);
+
+      // Возвращаем успешный ответ TipTopPay
+      return res.json({ success: true });
+    } catch (e) {
+      await transaction.rollback();
+      console.error("Error handling TipTopPay webhook:", e);
+      console.error("Stack:", e.stack);
+      // Возвращаем ошибку, чтобы TipTopPay знал о проблеме
+      return res.status(500).json({ success: false, error: e.message });
     }
-
-    console.log('Update data:', updateData);
-    await order.update(updateData, { transaction });
-    await transaction.commit();
-
-    console.log(`Order ${order.id} updated successfully. New status: ${updateData.status || order.status}`);
-
-    // Возвращаем успешный ответ TipTopPay
-    return res.json({ success: true });
-  } catch (e) {
-    await transaction.rollback();
-    console.error("Error handling TipTopPay webhook:", e);
-    console.error("Stack:", e.stack);
-    // Возвращаем ошибку, чтобы TipTopPay знал о проблеме
-    return res.status(500).json({ success: false, error: e.message });
   }
-}
 }
 
 module.exports = new OrderController();
