@@ -29,6 +29,9 @@ router.get("/my-orders", userLimiter, orderController.getUserOrders);
 // Получение одного заказа пользователя
 router.get("/my-orders/:orderId", userLimiter, orderController.getUserOrder);
 
+// Получение данных для оплаты заказа
+router.get("/my-orders/:orderId/payment-data", userLimiter, orderController.getOrderPaymentData);
+
 // Отмена заказа пользователем
 router.patch("/my-orders/:orderId/cancel", userLimiter, orderController.cancelOrder);
 

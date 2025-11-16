@@ -41,7 +41,7 @@ class OrderController {
     if (!userId && (!recipientPhone || !recipientEmail)) {
       await transaction.rollback();
       return next(ApiError.badRequest("Phone and email are required for guest orders"));
-    }
+      }
 
       // Подсчитываем общую стоимость и проверяем товары
       let totalKZT = 0;
@@ -473,6 +473,41 @@ class OrderController {
       return res.json(order);
     } catch (e) {
       console.error("Error getting user order:", e);
+      next(ApiError.internal(e.message));
+    }
+  }
+
+  // Получение данных для оплаты заказа
+  async getOrderPaymentData(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const { orderId } = req.params;
+
+      const order = await Order.findOne({
+        where: { id: orderId, userId },
+      });
+
+      if (!order) {
+        return next(ApiError.notFound("Order not found"));
+      }
+
+      // Проверяем, что заказ еще не оплачен
+      if (order.status === 'PAID' || order.paymentStatus === 'SUCCESS') {
+        return next(ApiError.badRequest("Order is already paid"));
+      }
+
+      // Возвращаем данные для виджета TipTopPay
+      return res.json({
+        paymentData: {
+          publicId: tipTopPayService.publicId,
+          orderId: order.id,
+          amount: order.totalKZT, // Сумма в тенге
+          currency: "KZT",
+          description: `Оплата заказа #${order.id}`,
+        },
+      });
+    } catch (e) {
+      console.error("Error getting order payment data:", e);
       next(ApiError.internal(e.message));
     }
   }
